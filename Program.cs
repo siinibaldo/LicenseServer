@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddEnvironmentVariables(); // <-- FIX
 
 // DB SQLite
 builder.Services.AddDbContext<AppDbContext>(options =>
