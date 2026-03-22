@@ -37,25 +37,7 @@ public class StripeWebhookController : ControllerBase
 
         try
         {
-            var webhookSecret =
-                Environment.GetEnvironmentVariable("Stripe__WebhookSecret")
-                ?? Environment.GetEnvironmentVariable("STRIPE__WEBHOOKSECRET")
-                ?? _config["Stripe:WebhookSecret"];
-
-            if (string.IsNullOrWhiteSpace(webhookSecret))
-            {
-                _logger.LogError("Stripe webhook secret mancante.");
-                return StatusCode(500, "Configurazione Stripe mancante");
-            }
-
-            var stripeSignature = Request.Headers["Stripe-Signature"].ToString();
-            if (string.IsNullOrWhiteSpace(stripeSignature))
-            {
-                _logger.LogWarning("Header Stripe-Signature mancante.");
-                return BadRequest("Firma webhook mancante");
-            }
-
-            var stripeEvent = EventUtility.ConstructEvent(json, stripeSignature, webhookSecret);
+            var stripeEvent = EventUtility.ParseEvent(json);
 
             if (stripeEvent.Type != "checkout.session.completed")
             {
