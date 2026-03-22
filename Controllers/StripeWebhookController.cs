@@ -37,7 +37,11 @@ public class StripeWebhookController : ControllerBase
 
         try
         {
-            var webhookSecret = GetSetting("Stripe:WebhookSecret", "Stripe__WebhookSecret");
+            var webhookSecret =
+                Environment.GetEnvironmentVariable("Stripe__WebhookSecret")
+                ?? Environment.GetEnvironmentVariable("STRIPE__WEBHOOKSECRET")
+                ?? _config["Stripe:WebhookSecret"];
+
             if (string.IsNullOrWhiteSpace(webhookSecret))
             {
                 _logger.LogError("Stripe webhook secret mancante.");
@@ -120,9 +124,20 @@ public class StripeWebhookController : ControllerBase
 
     private async Task SendLicenseEmail(string toEmail, string licenseKey)
     {
-        var apiKey = GetSetting("Brevo:ApiKey", "Brevo__ApiKey");
-        var fromEmail = GetSetting("Brevo:FromEmail", "Brevo__FromEmail");
-        var fromName = GetSetting("Brevo:FromName", "Brevo__FromName");
+        var apiKey =
+            Environment.GetEnvironmentVariable("Brevo__ApiKey")
+            ?? Environment.GetEnvironmentVariable("BREVO__APIKEY")
+            ?? _config["Brevo:ApiKey"];
+
+        var fromEmail =
+            Environment.GetEnvironmentVariable("Brevo__FromEmail")
+            ?? Environment.GetEnvironmentVariable("BREVO__FROMEMAIL")
+            ?? _config["Brevo:FromEmail"];
+
+        var fromName =
+            Environment.GetEnvironmentVariable("Brevo__FromName")
+            ?? Environment.GetEnvironmentVariable("BREVO__FROMNAME")
+            ?? _config["Brevo:FromName"];
 
         if (string.IsNullOrWhiteSpace(apiKey) ||
             string.IsNullOrWhiteSpace(fromEmail) ||
@@ -176,19 +191,6 @@ public class StripeWebhookController : ControllerBase
         {
             throw new Exception($"Errore invio email Brevo: {responseBody}");
         }
-    }
-
-    private string GetSetting(string configKey, string envKey)
-    {
-        var envValue = Environment.GetEnvironmentVariable(envKey);
-        if (!string.IsNullOrWhiteSpace(envValue))
-            return envValue.Trim();
-
-        var configValue = _config[configKey];
-        if (!string.IsNullOrWhiteSpace(configValue))
-            return configValue.Trim();
-
-        return string.Empty;
     }
 
     private string BuildLicenseKey(string sessionId)
