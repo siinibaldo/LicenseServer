@@ -53,7 +53,7 @@ public class StripeWebhookController : ControllerBase
 
             var stripeEvent = EventUtility.ConstructEvent(json, stripeSignature, webhookSecret);
 
-            if (stripeEvent.Type != Events.CheckoutSessionCompleted)
+            if (stripeEvent.Type != "checkout.session.completed")
             {
                 return Ok();
             }
