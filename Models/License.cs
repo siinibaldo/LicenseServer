@@ -8,11 +8,12 @@ public class License
 
     public string StripeSessionId { get; set; } = "";
 
-    public bool IsActive { get; set; } = true;
-
-    public bool EmailSent { get; set; } = false;
+    // stato semplice: inactive / active
+    public string Status { get; set; } = "inactive";
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public DateTime? ActivatedAt { get; set; }
 
     public string? MachineId { get; set; }
 }
