@@ -89,9 +89,9 @@ public class StripeWebhookController : ControllerBase
             if (existingLicense != null)
             {
                 _logger.LogInformation(
-                    "Webhook duplicato ignorato. SessionId: {SessionId}, EmailSent: {EmailSent}",
+                    "Webhook duplicato ignorato. SessionId: {SessionId}, LicenseKey: {LicenseKey}",
                     sessionId,
-                    existingLicense.EmailSent);
+                    existingLicense.LicenseKey);
 
                 return Ok();
             }
@@ -103,18 +103,16 @@ public class StripeWebhookController : ControllerBase
                 LicenseKey = licenseKey,
                 CustomerEmail = customerEmail,
                 StripeSessionId = sessionId,
-                IsActive = true,
-                EmailSent = false,
-                CreatedAt = DateTime.UtcNow
+                Status = "inactive",
+                CreatedAt = DateTime.UtcNow,
+                ActivatedAt = null,
+                MachineId = null
             };
 
             _db.Licenses.Add(license);
             await _db.SaveChangesAsync();
 
             await SendLicenseEmail(customerEmail, licenseKey);
-
-            license.EmailSent = true;
-            await _db.SaveChangesAsync();
 
             _logger.LogInformation(
                 "Licenza creata e inviata. SessionId: {SessionId}, Email: {Email}, LicenseKey: {LicenseKey}",

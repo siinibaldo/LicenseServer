@@ -19,7 +19,8 @@ public class LicenseController : ControllerBase
         var license = new License
         {
             LicenseKey = "TEST-1234",
-            IsActive = true
+            Status = "inactive", // nasce inattiva
+            CreatedAt = DateTime.UtcNow
         };
 
         _db.Licenses.Add(license);
@@ -38,19 +39,25 @@ public class LicenseController : ControllerBase
         if (license == null)
             return BadRequest("LICENSE_NOT_FOUND");
 
-        if (!license.IsActive)
+        if (license.Status != "inactive" && license.Status != "active")
             return BadRequest("LICENSE_DISABLED");
 
+        // prima attivazione
         if (string.IsNullOrEmpty(license.MachineId))
         {
             license.MachineId = request.MachineId;
+            license.Status = "active";
+            license.ActivatedAt = DateTime.UtcNow;
+
             await _db.SaveChangesAsync();
             return Ok("ACTIVATED");
         }
 
+        // macchina diversa
         if (license.MachineId != request.MachineId)
             return BadRequest("ALREADY_USED");
 
+        // stessa macchina
         return Ok("OK");
     }
 }
