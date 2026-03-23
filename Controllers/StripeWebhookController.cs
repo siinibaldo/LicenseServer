@@ -105,75 +105,66 @@ public class StripeWebhookController : ControllerBase
     }
 
     private async Task SendLicenseEmail(string toEmail, string licenseKey)
+{
+    var apiKey =
+        Environment.GetEnvironmentVariable("Brevo__ApiKey")
+        ?? Environment.GetEnvironmentVariable("BREVO__APIKEY")
+        ?? _config["Brevo:ApiKey"];
+
+    var fromEmail = "licenze@licensio.it";
+    var fromName = "Licensio";
+
+    if (string.IsNullOrWhiteSpace(apiKey))
     {
-        var apiKey =
-            Environment.GetEnvironmentVariable("Brevo__ApiKey")
-            ?? Environment.GetEnvironmentVariable("BREVO__APIKEY")
-            ?? _config["Brevo:ApiKey"];
-
-        var fromEmail =
-            Environment.GetEnvironmentVariable("Brevo__FromEmail")
-            ?? Environment.GetEnvironmentVariable("BREVO__FROMEMAIL")
-            ?? _config["Brevo:FromEmail"];
-
-        var fromName =
-            Environment.GetEnvironmentVariable("Brevo__FromName")
-            ?? Environment.GetEnvironmentVariable("BREVO__FROMNAME")
-            ?? _config["Brevo:FromName"];
-
-        if (string.IsNullOrWhiteSpace(apiKey) ||
-            string.IsNullOrWhiteSpace(fromEmail) ||
-            string.IsNullOrWhiteSpace(fromName))
-        {
-            throw new Exception("Configurazione Brevo mancante");
-        }
-
-        using var httpClient = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(30)
-        };
-
-        httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
-        httpClient.DefaultRequestHeaders.Accept.Add(
-            new MediaTypeWithQualityHeaderValue("application/json"));
-
-        var body = new
-        {
-            sender = new
-            {
-                name = fromName,
-                email = fromEmail
-            },
-            to = new[]
-            {
-                new { email = toEmail }
-            },
-            subject = "La tua licenza Licensio",
-            htmlContent = $@"
-                <html>
-                  <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #222;'>
-                    <h2>Pagamento ricevuto</h2>
-                    <p>Grazie per il tuo acquisto.</p>
-                    <p>La tua licenza è:</p>
-                    <p style='font-size: 20px; font-weight: bold; letter-spacing: 1px;'>{licenseKey}</p>
-                    <p>Conserva questa email per riferimento futuro.</p>
-                  </body>
-                </html>"
-        };
-
-        var content = new StringContent(
-            JsonSerializer.Serialize(body),
-            Encoding.UTF8,
-            "application/json");
-
-        var response = await httpClient.PostAsync("https://api.brevo.com/v3/smtp/email", content);
-        var responseBody = await response.Content.ReadAsStringAsync();
-
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new Exception($"Errore invio email Brevo: {responseBody}");
-        }
+        throw new Exception("Configurazione Brevo mancante: ApiKey");
     }
+
+    using var httpClient = new HttpClient
+    {
+        Timeout = TimeSpan.FromSeconds(30)
+    };
+
+    httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
+    httpClient.DefaultRequestHeaders.Accept.Add(
+        new MediaTypeWithQualityHeaderValue("application/json"));
+
+    var body = new
+    {
+        sender = new
+        {
+            name = fromName,
+            email = fromEmail
+        },
+        to = new[]
+        {
+            new { email = toEmail }
+        },
+        subject = "La tua licenza Licensio",
+        htmlContent = $@"
+            <html>
+              <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #222;'>
+                <h2>Pagamento ricevuto</h2>
+                <p>Grazie per il tuo acquisto.</p>
+                <p>La tua licenza è:</p>
+                <p style='font-size: 20px; font-weight: bold; letter-spacing: 1px;'>{licenseKey}</p>
+                <p>Conserva questa email per riferimento futuro.</p>
+              </body>
+            </html>"
+    };
+
+    var content = new StringContent(
+        JsonSerializer.Serialize(body),
+        Encoding.UTF8,
+        "application/json");
+
+    var response = await httpClient.PostAsync("https://api.brevo.com/v3/smtp/email", content);
+    var responseBody = await response.Content.ReadAsStringAsync();
+
+    if (!response.IsSuccessStatusCode)
+    {
+        throw new Exception($"Errore invio email Brevo: {responseBody}");
+    }
+}
 
     private string BuildLicenseKey(string sessionId)
     {
