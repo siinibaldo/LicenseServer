@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Stripe;
 using Stripe.Checkout;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Net.Http.Headers;
@@ -10,75 +12,153 @@ using System.Net.Http.Headers;
 public class StripeWebhookController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration _config;
+    private readonly ILogger<StripeWebhookController> _logger;
 
-    public StripeWebhookController(AppDbContext db)
+    public StripeWebhookController(
+        AppDbContext db,
+        IConfiguration config,
+        ILogger<StripeWebhookController> logger)
     {
         _db = db;
+        _config = config;
+        _logger = logger;
     }
 
     [HttpPost("webhook")]
     public async Task<IActionResult> Webhook()
     {
-        var json = await new StreamReader(HttpContext.Request.Body).ReadToEndAsync();
+        string json;
+
+        using (var reader = new StreamReader(HttpContext.Request.Body))
+        {
+            json = await reader.ReadToEndAsync();
+        }
 
         try
         {
-            // 🔥 NO SIGNATURE CHECK (per test)
             var stripeEvent = EventUtility.ParseEvent(json);
 
             if (stripeEvent.Type != "checkout.session.completed")
+            {
                 return Ok();
+            }
 
             var session = stripeEvent.Data.Object as Session;
+            if (session == null)
+            {
+                _logger.LogWarning("Session Stripe nulla o non valida.");
+                return BadRequest("Sessione Stripe non valida");
+            }
 
-            var email = session?.CustomerDetails?.Email;
+            var customerEmail = session.CustomerDetails?.Email ?? session.CustomerEmail;
+            if (string.IsNullOrWhiteSpace(customerEmail))
+            {
+                _logger.LogWarning("Email cliente non trovata per session {SessionId}.", session.Id);
+                return BadRequest("Email cliente non trovata");
+            }
 
-            if (string.IsNullOrWhiteSpace(email))
-                return BadRequest("Email non trovata");
+            var licenseKey = BuildLicenseKey(session.Id);
 
-            var licenseKey = "LIC-" + Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper();
+            var existingLicense = await _db.Licenses
+                .FirstOrDefaultAsync(x => x.LicenseKey == licenseKey);
 
-            _db.Licenses.Add(new License
+            if (existingLicense != null)
+            {
+                _logger.LogInformation(
+                    "Webhook duplicato o già processato. SessionId: {SessionId}, LicenseKey: {LicenseKey}",
+                    session.Id,
+                    licenseKey);
+
+                return Ok();
+            }
+
+            var license = new License
             {
                 LicenseKey = licenseKey,
                 IsActive = true
-            });
+            };
 
+            _db.Licenses.Add(license);
             await _db.SaveChangesAsync();
 
-            await SendEmail(email, licenseKey);
+            await SendLicenseEmail(customerEmail, licenseKey);
+
+            _logger.LogInformation(
+                "Licenza creata e inviata. SessionId: {SessionId}, Email: {Email}, LicenseKey: {LicenseKey}",
+                session.Id,
+                customerEmail,
+                licenseKey);
 
             return Ok();
         }
+        catch (StripeException ex)
+        {
+            _logger.LogError(ex, "Errore Stripe webhook.");
+            return BadRequest("Webhook Stripe non valido");
+        }
         catch (Exception ex)
         {
-            return BadRequest(ex.ToString());
+            _logger.LogError(ex, "Errore interno nel webhook Stripe.");
+            return StatusCode(500, "Errore interno");
         }
     }
 
-    private async Task SendEmail(string toEmail, string licenseKey)
+    private async Task SendLicenseEmail(string toEmail, string licenseKey)
     {
-        var apiKey = Environment.GetEnvironmentVariable("Brevo__ApiKey");
+        var apiKey =
+            Environment.GetEnvironmentVariable("Brevo__ApiKey")
+            ?? Environment.GetEnvironmentVariable("BREVO__APIKEY")
+            ?? _config["Brevo:ApiKey"];
 
-        using var http = new HttpClient();
+        var fromEmail =
+            Environment.GetEnvironmentVariable("Brevo__FromEmail")
+            ?? Environment.GetEnvironmentVariable("BREVO__FROMEMAIL")
+            ?? _config["Brevo:FromEmail"];
 
-        http.DefaultRequestHeaders.Add("api-key", apiKey);
-        http.DefaultRequestHeaders.Accept.Add(
+        var fromName =
+            Environment.GetEnvironmentVariable("Brevo__FromName")
+            ?? Environment.GetEnvironmentVariable("BREVO__FROMNAME")
+            ?? _config["Brevo:FromName"];
+
+        if (string.IsNullOrWhiteSpace(apiKey) ||
+            string.IsNullOrWhiteSpace(fromEmail) ||
+            string.IsNullOrWhiteSpace(fromName))
+        {
+            throw new Exception("Configurazione Brevo mancante");
+        }
+
+        using var httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(30)
+        };
+
+        httpClient.DefaultRequestHeaders.Add("api-key", apiKey);
+        httpClient.DefaultRequestHeaders.Accept.Add(
             new MediaTypeWithQualityHeaderValue("application/json"));
 
         var body = new
         {
             sender = new
             {
-                name = "Licensio",
-                email = "licenze@licensio.it"
+                name = fromName,
+                email = fromEmail
             },
             to = new[]
             {
                 new { email = toEmail }
             },
-            subject = "La tua licenza",
-            htmlContent = $"<h2>Licenza:</h2><b>{licenseKey}</b>"
+            subject = "La tua licenza Licensio",
+            htmlContent = $@"
+                <html>
+                  <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #222;'>
+                    <h2>Pagamento ricevuto</h2>
+                    <p>Grazie per il tuo acquisto.</p>
+                    <p>La tua licenza è:</p>
+                    <p style='font-size: 20px; font-weight: bold; letter-spacing: 1px;'>{licenseKey}</p>
+                    <p>Conserva questa email per riferimento futuro.</p>
+                  </body>
+                </html>"
         };
 
         var content = new StringContent(
@@ -86,11 +166,21 @@ public class StripeWebhookController : ControllerBase
             Encoding.UTF8,
             "application/json");
 
-        var res = await http.PostAsync("https://api.brevo.com/v3/smtp/email", content);
+        var response = await httpClient.PostAsync("https://api.brevo.com/v3/smtp/email", content);
+        var responseBody = await response.Content.ReadAsStringAsync();
 
-        var txt = await res.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new Exception($"Errore invio email Brevo: {responseBody}");
+        }
+    }
 
-        if (!res.IsSuccessStatusCode)
-            throw new Exception(txt);
+    private string BuildLicenseKey(string sessionId)
+    {
+        using var sha = SHA256.Create();
+        var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(sessionId));
+        var hex = Convert.ToHexString(hash);
+
+        return "LIC-" + hex[..16];
     }
 }
