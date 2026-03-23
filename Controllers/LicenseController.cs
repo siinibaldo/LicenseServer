@@ -12,27 +12,12 @@ public class LicenseController : ControllerBase
         _db = db;
     }
 
-    // CREA LICENZA (TEST)
-    [HttpPost("create")]
-    public async Task<IActionResult> Create()
-    {
-        var license = new License
-        {
-            LicenseKey = "TEST-1234",
-            Status = "inactive", // nasce inattiva
-            CreatedAt = DateTime.UtcNow
-        };
-
-        _db.Licenses.Add(license);
-        await _db.SaveChangesAsync();
-
-        return Ok(license.LicenseKey);
-    }
-
-    // ATTIVA
     [HttpPost("activate")]
     public async Task<IActionResult> Activate([FromBody] ActivateRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.LicenseKey) || string.IsNullOrWhiteSpace(request.MachineId))
+            return BadRequest("INVALID_REQUEST");
+
         var license = await _db.Licenses
             .FirstOrDefaultAsync(l => l.LicenseKey == request.LicenseKey);
 
@@ -42,8 +27,7 @@ public class LicenseController : ControllerBase
         if (license.Status != "inactive" && license.Status != "active")
             return BadRequest("LICENSE_DISABLED");
 
-        // prima attivazione
-        if (string.IsNullOrEmpty(license.MachineId))
+        if (string.IsNullOrWhiteSpace(license.MachineId))
         {
             license.MachineId = request.MachineId;
             license.Status = "active";
@@ -53,16 +37,41 @@ public class LicenseController : ControllerBase
             return Ok("ACTIVATED");
         }
 
-        // macchina diversa
         if (license.MachineId != request.MachineId)
             return BadRequest("ALREADY_USED");
 
-        // stessa macchina
         return Ok("OK");
+    }
+
+    [HttpPost("validate")]
+    public async Task<IActionResult> Validate([FromBody] ValidateRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.LicenseKey) || string.IsNullOrWhiteSpace(request.MachineId))
+            return BadRequest("INVALID_REQUEST");
+
+        var license = await _db.Licenses
+            .FirstOrDefaultAsync(l => l.LicenseKey == request.LicenseKey);
+
+        if (license == null)
+            return BadRequest("LICENSE_NOT_FOUND");
+
+        if (license.Status != "active")
+            return BadRequest("LICENSE_NOT_ACTIVE");
+
+        if (license.MachineId != request.MachineId)
+            return BadRequest("INVALID_MACHINE");
+
+        return Ok("VALID");
     }
 }
 
 public class ActivateRequest
+{
+    public string LicenseKey { get; set; } = string.Empty;
+    public string MachineId { get; set; } = string.Empty;
+}
+
+public class ValidateRequest
 {
     public string LicenseKey { get; set; } = string.Empty;
     public string MachineId { get; set; } = string.Empty;
