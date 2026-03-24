@@ -64,7 +64,7 @@ public class StripeWebhookController : ControllerBase
                         PriceData = new SessionLineItemPriceDataOptions
                         {
                             Currency = "eur",
-                            UnitAmount = 4900, // 49,00 EUR - CAMBIA QUI
+                            UnitAmount = 990, // 9,90 EUR - CAMBIA QUI
                             ProductData = new SessionLineItemPriceDataProductDataOptions
                             {
                                 Name = "Licensio",
