@@ -26,68 +26,61 @@ public class StripeWebhookController : ControllerBase
     }
 
     [HttpPost("create-checkout-session")]
-    public IActionResult CreateCheckoutSession([FromBody] CreateCheckoutRequest request)
+public IActionResult CreateCheckoutSession([FromBody] CreateCheckoutRequest request)
+{
+    try
     {
-        try
+        var stripeSecretKey =
+            Environment.GetEnvironmentVariable("Stripe__SecretKey")
+            ?? _config["Stripe:SecretKey"];
+
+        var priceId =
+            Environment.GetEnvironmentVariable("STRIPE__PRICE_ID")
+            ?? _config["Stripe:PriceId"];
+
+        if (string.IsNullOrWhiteSpace(stripeSecretKey))
+            return StatusCode(500, "Stripe secret key mancante");
+
+        if (string.IsNullOrWhiteSpace(priceId))
+            return StatusCode(500, "Stripe price id mancante");
+
+        if (request == null ||
+            string.IsNullOrWhiteSpace(request.SuccessUrl) ||
+            string.IsNullOrWhiteSpace(request.CancelUrl))
         {
-            var stripeSecretKey =
-                Environment.GetEnvironmentVariable("Stripe__SecretKey")
-                ?? _config["Stripe:SecretKey"];
+            return BadRequest("SuccessUrl e CancelUrl sono obbligatori");
+        }
 
-            if (string.IsNullOrWhiteSpace(stripeSecretKey))
+        StripeConfiguration.ApiKey = stripeSecretKey;
+
+        var options = new SessionCreateOptions
+        {
+            Mode = "payment",
+            SuccessUrl = request.SuccessUrl,
+            CancelUrl = request.CancelUrl,
+            CustomerCreation = "always",
+            PaymentMethodTypes = new List<string> { "card" },
+            LineItems = new List<SessionLineItemOptions>
             {
-                _logger.LogError("Stripe secret key mancante.");
-                return StatusCode(500, "Stripe secret key mancante");
-            }
-
-            if (request == null ||
-                string.IsNullOrWhiteSpace(request.SuccessUrl) ||
-                string.IsNullOrWhiteSpace(request.CancelUrl))
-            {
-                return BadRequest("SuccessUrl e CancelUrl sono obbligatori");
-            }
-
-            StripeConfiguration.ApiKey = stripeSecretKey;
-
-            var options = new SessionCreateOptions
-            {
-                Mode = "payment",
-                SuccessUrl = request.SuccessUrl,
-                CancelUrl = request.CancelUrl,
-                CustomerCreation = "always",
-                PaymentMethodTypes = new List<string> { "card" },
-                LineItems = new List<SessionLineItemOptions>
+                new SessionLineItemOptions
                 {
-                    new SessionLineItemOptions
-                    {
-                        Quantity = 1,
-                        Price = "price_1TDXr8LSENQ0eRXfK3YtbuXl"
-                    }
+                    Quantity = 1,
+                    Price = priceId
                 }
-            };
-
-            var service = new SessionService();
-            var session = service.Create(options);
-
-            if (string.IsNullOrWhiteSpace(session.Url))
-            {
-                _logger.LogError("Stripe ha creato la sessione ma session.Url è vuoto.");
-                return StatusCode(500, "URL checkout non disponibile");
             }
+        };
 
-            return Ok(new { url = session.Url });
-        }
-        catch (StripeException ex)
-        {
-            _logger.LogError(ex, "Errore Stripe durante la creazione della checkout session.");
-            return StatusCode(500, $"Errore Stripe: {ex.Message}");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Errore interno nella creazione della checkout session.");
-            return StatusCode(500, "Errore interno");
-        }
+        var service = new SessionService();
+        var session = service.Create(options);
+
+        return Ok(new { url = session.Url });
     }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "Errore checkout");
+        return StatusCode(500, "Errore interno");
+    }
+}
 
     [HttpPost("webhook")]
     public async Task<IActionResult> Webhook()
