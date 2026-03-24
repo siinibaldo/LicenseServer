@@ -25,6 +25,79 @@ public class StripeWebhookController : ControllerBase
         _logger = logger;
     }
 
+    [HttpPost("create-checkout-session")]
+    public IActionResult CreateCheckoutSession([FromBody] CreateCheckoutRequest request)
+    {
+        try
+        {
+            var stripeSecretKey =
+                Environment.GetEnvironmentVariable("Stripe__SecretKey")
+                ?? _config["Stripe:SecretKey"];
+
+            if (string.IsNullOrWhiteSpace(stripeSecretKey))
+            {
+                _logger.LogError("Stripe secret key mancante.");
+                return StatusCode(500, "Stripe secret key mancante");
+            }
+
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.SuccessUrl) ||
+                string.IsNullOrWhiteSpace(request.CancelUrl))
+            {
+                return BadRequest("SuccessUrl e CancelUrl sono obbligatori");
+            }
+
+            StripeConfiguration.ApiKey = stripeSecretKey;
+
+            var options = new SessionCreateOptions
+            {
+                Mode = "payment",
+                SuccessUrl = request.SuccessUrl,
+                CancelUrl = request.CancelUrl,
+                CustomerCreation = "always",
+                PaymentMethodTypes = new List<string> { "card" },
+                LineItems = new List<SessionLineItemOptions>
+                {
+                    new SessionLineItemOptions
+                    {
+                        Quantity = 1,
+                        PriceData = new SessionLineItemPriceDataOptions
+                        {
+                            Currency = "eur",
+                            UnitAmount = 4900, // 49,00 EUR - CAMBIA QUI
+                            ProductData = new SessionLineItemPriceDataProductDataOptions
+                            {
+                                Name = "Licensio",
+                                Description = "Licenza software Licensio"
+                            }
+                        }
+                    }
+                }
+            };
+
+            var service = new SessionService();
+            var session = service.Create(options);
+
+            if (string.IsNullOrWhiteSpace(session.Url))
+            {
+                _logger.LogError("Stripe ha creato la sessione ma session.Url è vuoto.");
+                return StatusCode(500, "URL checkout non disponibile");
+            }
+
+            return Ok(new { url = session.Url });
+        }
+        catch (StripeException ex)
+        {
+            _logger.LogError(ex, "Errore Stripe durante la creazione della checkout session.");
+            return StatusCode(500, $"Errore Stripe: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Errore interno nella creazione della checkout session.");
+            return StatusCode(500, "Errore interno");
+        }
+    }
+
     [HttpPost("webhook")]
     public async Task<IActionResult> Webhook()
     {
@@ -199,4 +272,10 @@ public class StripeWebhookController : ControllerBase
 
         return "LIC-" + hex[..16];
     }
+}
+
+public class CreateCheckoutRequest
+{
+    public string SuccessUrl { get; set; } = string.Empty;
+    public string CancelUrl { get; set; } = string.Empty;
 }
