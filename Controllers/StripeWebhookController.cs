@@ -61,16 +61,7 @@ public class StripeWebhookController : ControllerBase
                     new SessionLineItemOptions
                     {
                         Quantity = 1,
-                        PriceData = new SessionLineItemPriceDataOptions
-                        {
-                            Currency = "eur",
-                            UnitAmount = 990, // 9,90 EUR - CAMBIA QUI
-                            ProductData = new SessionLineItemPriceDataProductDataOptions
-                            {
-                                Name = "Licensio",
-                                Description = "Licenza software Licensio"
-                            }
-                        }
+                        Price = "price_1TDXr8LSENQ0eRXfK3YtbuXl"
                     }
                 }
             };
