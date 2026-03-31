@@ -129,17 +129,39 @@ public class StripeWebhookController : ControllerBase
                 return BadRequest("Sessione Stripe non valida");
             }
 
-            var product = session.Metadata != null &&
-                          session.Metadata.TryGetValue("product", out var productValue)
-                ? productValue
-                : null;
+            var licensioPriceId =
+                Environment.GetEnvironmentVariable("STRIPE__PRICE_ID")
+                ?? _config["Stripe:PriceId"];
 
-            if (!string.Equals(product, "licensio", StringComparison.OrdinalIgnoreCase))
+            var stripeSecretKey =
+                Environment.GetEnvironmentVariable("Stripe__SecretKey")
+                ?? _config["Stripe:SecretKey"];
+
+            if (string.IsNullOrWhiteSpace(licensioPriceId))
+            {
+                _logger.LogError("Stripe price id Licensio mancante.");
+                return StatusCode(500, "Configurazione Stripe mancante");
+            }
+
+            if (string.IsNullOrWhiteSpace(stripeSecretKey))
+            {
+                _logger.LogError("Stripe secret key mancante.");
+                return StatusCode(500, "Configurazione Stripe mancante");
+            }
+
+            StripeConfiguration.ApiKey = stripeSecretKey;
+
+            var sessionService = new SessionService();
+            var lineItems = sessionService.ListLineItems(session.Id);
+
+            var paidPriceId = lineItems.Data.FirstOrDefault()?.Price?.Id;
+
+            if (!string.Equals(paidPriceId, licensioPriceId, StringComparison.Ordinal))
             {
                 _logger.LogInformation(
-                    "Evento Stripe ignorato: non appartiene a Licensio. SessionId: {SessionId}, Product: {Product}",
+                    "Evento Stripe ignorato: non appartiene a Licensio. SessionId: {SessionId}, PaidPriceId: {PaidPriceId}",
                     session.Id,
-                    product ?? "(null)");
+                    paidPriceId ?? "(null)");
 
                 return Ok();
             }
