@@ -26,61 +26,65 @@ public class StripeWebhookController : ControllerBase
     }
 
     [HttpPost("create-checkout-session")]
-public IActionResult CreateCheckoutSession([FromBody] CreateCheckoutRequest request)
-{
-    try
+    public IActionResult CreateCheckoutSession([FromBody] CreateCheckoutRequest request)
     {
-        var stripeSecretKey =
-            Environment.GetEnvironmentVariable("Stripe__SecretKey")
-            ?? _config["Stripe:SecretKey"];
-
-        var priceId =
-            Environment.GetEnvironmentVariable("STRIPE__PRICE_ID")
-            ?? _config["Stripe:PriceId"];
-
-        if (string.IsNullOrWhiteSpace(stripeSecretKey))
-            return StatusCode(500, "Stripe secret key mancante");
-
-        if (string.IsNullOrWhiteSpace(priceId))
-            return StatusCode(500, "Stripe price id mancante");
-
-        if (request == null ||
-            string.IsNullOrWhiteSpace(request.SuccessUrl) ||
-            string.IsNullOrWhiteSpace(request.CancelUrl))
+        try
         {
-            return BadRequest("SuccessUrl e CancelUrl sono obbligatori");
-        }
+            var stripeSecretKey =
+                Environment.GetEnvironmentVariable("Stripe__SecretKey")
+                ?? _config["Stripe:SecretKey"];
 
-        StripeConfiguration.ApiKey = stripeSecretKey;
+            var priceId =
+                Environment.GetEnvironmentVariable("STRIPE__PRICE_ID")
+                ?? _config["Stripe:PriceId"];
 
-        var options = new SessionCreateOptions
-        {
-            Mode = "payment",
-            SuccessUrl = request.SuccessUrl,
-            CancelUrl = request.CancelUrl,
-            CustomerCreation = "always",
-            PaymentMethodTypes = new List<string> { "card" },
-            LineItems = new List<SessionLineItemOptions>
+            if (string.IsNullOrWhiteSpace(stripeSecretKey))
+                return StatusCode(500, "Stripe secret key mancante");
+
+            if (string.IsNullOrWhiteSpace(priceId))
+                return StatusCode(500, "Stripe price id mancante");
+
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.SuccessUrl) ||
+                string.IsNullOrWhiteSpace(request.CancelUrl))
             {
-                new SessionLineItemOptions
-                {
-                    Quantity = 1,
-                    Price = priceId
-                }
+                return BadRequest("SuccessUrl e CancelUrl sono obbligatori");
             }
-        };
 
-        var service = new SessionService();
-        var session = service.Create(options);
+            StripeConfiguration.ApiKey = stripeSecretKey;
 
-        return Ok(new { url = session.Url });
+            var options = new SessionCreateOptions
+            {
+                Mode = "payment",
+                SuccessUrl = request.SuccessUrl,
+                CancelUrl = request.CancelUrl,
+                CustomerCreation = "always",
+                PaymentMethodTypes = new List<string> { "card" },
+                Metadata = new Dictionary<string, string>
+                {
+                    { "product", "licensio" }
+                },
+                LineItems = new List<SessionLineItemOptions>
+                {
+                    new SessionLineItemOptions
+                    {
+                        Quantity = 1,
+                        Price = priceId
+                    }
+                }
+            };
+
+            var service = new SessionService();
+            var session = service.Create(options);
+
+            return Ok(new { url = session.Url });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Errore checkout");
+            return StatusCode(500, "Errore interno");
+        }
     }
-    catch (Exception ex)
-    {
-        _logger.LogError(ex, "Errore checkout");
-        return StatusCode(500, "Errore interno");
-    }
-}
 
     [HttpPost("webhook")]
     public async Task<IActionResult> Webhook()
@@ -123,6 +127,21 @@ public IActionResult CreateCheckoutSession([FromBody] CreateCheckoutRequest requ
             {
                 _logger.LogWarning("Session Stripe non valida.");
                 return BadRequest("Sessione Stripe non valida");
+            }
+
+            var product = session.Metadata != null &&
+                          session.Metadata.TryGetValue("product", out var productValue)
+                ? productValue
+                : null;
+
+            if (!string.Equals(product, "licensio", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation(
+                    "Evento Stripe ignorato: non appartiene a Licensio. SessionId: {SessionId}, Product: {Product}",
+                    session.Id,
+                    product ?? "(null)");
+
+                return Ok();
             }
 
             var sessionId = session.Id;
